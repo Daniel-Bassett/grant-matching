@@ -21,7 +21,7 @@ except:
     client = OpenAI(api_key=st.secrets["api_key"])
 
 
-st.set_page_config(layout='wide')
+# st.set_page_config(layout='wide')
 
 @st.cache_data
 def load_data(path):
