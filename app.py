@@ -21,6 +21,19 @@ try:
 except:
     client = OpenAI(api_key=st.secrets["api_key"])
 
+import pandas as pd
+import sys
+import os 
+
+# Add the project root directory to the Python path
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+sys.path.append(project_root)
+
+from src.embedding.text_embedder import TextProcessor
+
+# instance of text processor
+tp = TextProcessor()
+
 # try:
 #     client = OpenAI(api_key=API_KEY)
 # except:
@@ -47,6 +60,17 @@ def concat_df(list_of_df):
     """
     grants = pd.concat(list_of_df).reset_index(drop=True)
     return grants
+
+
+@st.cache_data
+def process_df(df):
+    df = df.rename(columns={'parent_name': 'agency'})
+    df = df.rename(columns={'sbir_topic_link': 'url'})
+    df = df.rename(columns={'topic_title': 'title'})
+    df = df.rename(columns={'opportunity_number': 'topic_number'})
+    df = df.query('text.str.len() > 250')
+    df = df.reset_index(drop=True)
+    return df
 
 
 def get_embedding(text, model="text-embedding-ada-002"):
@@ -101,16 +125,6 @@ def convert_df_to_csv(df):
     return output.getvalue()
 
 
-def process_df(df):
-    df = df.rename(columns={'parent_name': 'agency'})
-    df = df.rename(columns={'sbir_topic_link': 'url'})
-    df = df.rename(columns={'topic_title': 'title'})
-    df = df.rename(columns={'opportunity_number': 'topic_number'})
-    df = df.query('text.str.len() > 250')
-    df = df.reset_index(drop=True)
-    return df
-
-
 def read_file(uploaded_file):
     file_name = uploaded_file.name
     if '.csv' in file_name:
@@ -141,16 +155,35 @@ def find_rows_to_merge(ws, column):
     return merge_ranges
 
 
+def modified_jaccard(set1, set2):
+    # Convert lists to sets (if they aren't sets already)
+    set1 = set(set1)
+    set2 = set(set2)
+
+    # Calculate intersection and union
+    intersection = set1.intersection(set2)
+
+    # Compute Jaccard Index
+    jaccard_index = len(intersection) / len(set2)
+    return jaccard_index
+
+
 # load data
 dod = load_data('data/dod_processed.parquet')
 doe = load_data('data/doe_processed.parquet')
 hhs = load_data('data/hhs_processed.parquet')
 
-dod = process_df(dod)
-doe = process_df(doe)
-hhs = process_df(hhs)
+if 'grants' not in st.session_state:
+    dod = process_df(dod)
+    doe = process_df(doe)
+    hhs = process_df(hhs)
 
-grants = concat_df([dod, doe, hhs])
+    temp_grant = concat_df([dod, doe, hhs])
+
+    st.session_state['grants'] = temp_grant
+
+grants = st.session_state['grants']
+
 
 
 if "button1" not in st.session_state:
@@ -172,23 +205,22 @@ selected = option_menu(
     menu_title=None,
     menu_icon='cast',
     default_index=0,
-    options=['Drag Drop', 'Text Box'],
+    options=['Drag & Drop', 'Text Box'],
     orientation='horizontal',
-    icons=['funnel', 'graph-up'],
+    icons=['droplet', 'card-text'],
     styles= {'container': {
                 'font-size': '12px'
     }}
 )
 
 
-if selected == 'Drag Drop':
+if selected == 'Drag & Drop':
 
     # Upload csv
     uploaded_file  = st.file_uploader('Choose a file', accept_multiple_files=False)
 
     if uploaded_file is not None:
         dataframe = read_file(uploaded_file)
-        st.write(dataframe)
 
         # drop duplicate abstracts
         dataframe = (dataframe
@@ -213,27 +245,51 @@ if selected == 'Drag Drop':
         st.session_state['download_csv'] = False
 
     if st.session_state['button1'] and uploaded_file is not None and st.session_state['download_csv'] == False:
-        column_names = ['company', 'project_title', 'summary', 'agency', 'grant_title', 'url']
+        column_names = ['company', 'project_title', 'summary', 'agency', 'grant_title', 'url', 'text']
         grant_recommendations = pd.DataFrame(columns=column_names)
         for index, row in dataframe.iterrows():
             company = row['company']
             summary = row['summary']
             title = row['title']
             query_embedding = get_embedding(summary)
-            similarity_index = (grants['text_embedded']
-                                .apply(lambda y: np.dot(query_embedding, y))
-                                .sort_values(ascending=False)
-                                .head(3))
-            similarity_index = similarity_index.index
-            for index2, row2 in grants.iloc[similarity_index].iterrows():
+
+            # tokens and ngrams for abstract text
+            tokens = tp.generate_tokens(text=summary)
+            unigrams = tp.generate_ngrams(tokens, 1)
+            bigrams = tp.generate_ngrams(tokens, 2)
+            trigrams = tp.generate_ngrams(tokens, 3)
+            temp_df = (grants
+                      .assign(
+                          jaccard_unigram=grants['unigrams'].apply(lambda x: modified_jaccard(x, unigrams)),
+                          jaccard_bigram=grants['bigrams'].apply(lambda x: modified_jaccard(x, bigrams)),
+                          jaccard_trigram=grants['trigrams'].apply(lambda x: modified_jaccard(x, trigrams)),
+                          cosine_similarity=grants['text_embedded'].apply(lambda y: np.dot(query_embedding, y)),
+                          description_len=grants['text'].str.len()
+                          )
+                      .query('cosine_similarity >= 0.80 and jaccard_bigram != 0')
+                      .groupby(['topic_number'], as_index=False)
+                      .agg(
+                          title=('title', 'max'),
+                          topic_number=('topic_number', 'max'),
+                          text=('text', 'sum'),
+                          jaccard_bigram=('jaccard_bigram', 'max'),
+                          jaccard_trigram=('jaccard_trigram', 'max'),
+                          cosine_similarity=('cosine_similarity', 'max'),
+                          description_len=('description_len', 'median'),
+                          url=('url', 'max'),
+                          agency=('agency', 'max')
+                          )
+                    ).sort_values(by='cosine_similarity', ascending=False).head(3)
+            for index2, row2 in temp_df.iterrows():
                 agency = row2['agency']
                 grant_title = row2['title']
                 url = row2['url']
-                new_row = {'company': company, 'project_title': title, 'summary': summary, 'agency': agency, 'grant_title': grant_title, 'url': url}
+                text = row2['text']
+                cosine_similarity = row2['cosine_similarity']
+                new_row = {'company': company, 'project_title': title, 'summary': summary, 'agency': agency, 'grant_title': grant_title, 'text': text, 'url': url}
                 new_row_df = pd.DataFrame([new_row])
                 grant_recommendations = pd.concat([grant_recommendations, new_row_df], ignore_index=True)
         st.session_state["grant_recommendations"] = grant_recommendations
-
 
 
     if not st.session_state["grant_recommendations"].empty:
@@ -267,21 +323,41 @@ if selected == 'Text Box':
     if find_program:
         st.session_state['text_box_button'] = True
 
-    if st.session_state['text_box_button']:
+    if st.session_state['text_box_button'] & len(query) > 0:
+        # tokens and ngrams for abstract text
         query_embedding = get_embedding(query)
-        similarity_index = (grants['text_embedded']
-                            .apply(lambda y: np.dot(query_embedding, y))
-                            .sort_values(ascending=False)
-                            .head(30))
-        similarity_index = similarity_index.index
-        st.data_editor(
-                    (grants.iloc[similarity_index][['title', 'text', 'topic_number', 'url']]
-                    # .groupby('topic_number', as_index=False)['text']
-                    # .sum()
-                    ),
-                    hide_index=True,
-                    use_container_width=True,
-                    )
+        tokens = tp.generate_tokens(text=query)
+        unigrams = tp.generate_ngrams(tokens, 1)
+        bigrams = tp.generate_ngrams(tokens, 2)
+        trigrams = tp.generate_ngrams(tokens, 3)
+
+        temp_df = (grants
+                  .assign(
+                      jaccard_unigram=grants['unigrams'].apply(lambda x: modified_jaccard(x, unigrams)),
+                      jaccard_bigram=grants['bigrams'].apply(lambda x: modified_jaccard(x, bigrams)),
+                      jaccard_trigram=grants['trigrams'].apply(lambda x: modified_jaccard(x, trigrams)),
+                      cosine_similarity=grants['text_embedded'].apply(lambda y: np.dot(query_embedding, y)),
+                      description_len=grants['text'].str.len()
+                      )
+                  .query('cosine_similarity >= 0.80 and jaccard_bigram != 0')
+                  .groupby(['topic_number'], as_index=False)
+                  .agg(title=('title', 'max'),
+                       topic_number=('topic_number', 'max'),
+                       text=('text', 'sum'),
+                       jaccard_bigram=('jaccard_bigram', 'max'),
+                       jaccard_trigram=('jaccard_trigram', 'max'),
+                       cosine_similarity=('cosine_similarity', 'max'),
+                       description_len=('description_len', 'median'),
+                       url=('url', 'max')
+                       )
+                  ).sort_values(by='cosine_similarity', ascending=False)
+        
+
+
+        st.write(temp_df[['title', 'topic_number', 'text', 'jaccard_bigram', 'jaccard_trigram', 'description_len', 'cosine_similarity', 'url']])
+        fig = px.scatter(temp_df, x='jaccard_bigram', y='cosine_similarity', trendline="ols", trendline_color_override='red', opacity=0.5)
+        st.plotly_chart(fig)
+
 
 
     # for index, row in grants.iloc[similarity_index].iterrows():

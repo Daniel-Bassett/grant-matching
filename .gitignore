@@ -19,6 +19,8 @@ __pycache__/
 .ipynb_checkpoints
 */.ipynb_checkpoints/*
 
+data/backups
+
 # IPython
 profile_default/
 ipython_config.py
