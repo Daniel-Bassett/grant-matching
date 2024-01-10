@@ -5,7 +5,6 @@ import string
 import pandas as pd
 import numpy as np
 from openai import OpenAI
-import tiktoken
 import streamlit as st
 
 import spacy
