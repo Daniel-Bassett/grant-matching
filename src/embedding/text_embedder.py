@@ -16,7 +16,6 @@ nltk.download('stopwords')
 
 class TextProcessor:
     def __init__(self):
-        self.encoding = tiktoken.get_encoding("cl100k_base")
         self.nlp = spacy.load('en_core_web_sm')    
     
     def remove_duplicate_lines(self, text):
