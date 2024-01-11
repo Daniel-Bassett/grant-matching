@@ -235,8 +235,6 @@ if find_program:
     st.session_state['button1'] = True
     st.session_state['download_csv'] = False
 
-st.write(grants)
-
 if st.session_state['button1'] and uploaded_file is not None and st.session_state['download_csv'] == False:
     column_names = ['company', 
                     'project_title', 
