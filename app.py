@@ -173,16 +173,16 @@ dod = load_data('data/dod_processed.parquet')
 doe = load_data('data/doe_processed.parquet')
 hhs = load_data('data/hhs_processed.parquet')
 
-if 'grants' not in st.session_state:
-    dod = process_df(dod)
-    doe = process_df(doe)
-    hhs = process_df(hhs)
+# if 'grants' not in st.session_state:
+#     dod = process_df(dod)
+#     doe = process_df(doe)
+#     hhs = process_df(hhs)
 
-    temp_grant = concat_df([dod, doe, hhs])
+#     temp_grant = concat_df([dod, doe, hhs])
 
-    st.session_state['grants'] = temp_grant
+#     st.session_state['grants'] = temp_grant
 
-grants = st.session_state['grants']
+grants = concat_df([dod, doe, hhs])
 
 
 
