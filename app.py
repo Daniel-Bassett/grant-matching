@@ -61,7 +61,6 @@ def concat_df(list_of_df):
     return grants
 
 
-@st.cache_data
 def process_df(df):
     df = df.rename(columns={'parent_name': 'agency'})
     df = df.rename(columns={'sbir_topic_link': 'url'})
