@@ -184,7 +184,7 @@ if "button2" not in st.session_state:
     st.session_state["button2"] = False
 
 if "grant_recommendations" not in st.session_state:
-    st.session_state["grant_recommendations"] = False
+    st.session_state["grant_recommendations"] = pd.DataFrame()
 
 if "text_box_button" not in st.session_state:
     st.session_state['text_box_button'] = False
@@ -287,10 +287,11 @@ if st.session_state['button1'] and uploaded_file is not None and st.session_stat
                        'text': text, 'url': url}
             new_row_df = pd.DataFrame([new_row])
             grant_recommendations = pd.concat([grant_recommendations, new_row_df], ignore_index=True)
-    st.session_state["grant_recommendations"] = True
+    st.session_state["grant_recommendations"] = grant_recommendations
 
 
-if st.session_state["grant_recommendations"] == True:
+if not st.session_state["grant_recommendations"].empty:
+    grant_recommendations = st.session_state["grant_recommendations"]
     st.divider()
     st.subheader('Grant Recommendations')
     st.write(grant_recommendations)
