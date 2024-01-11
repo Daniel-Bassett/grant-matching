@@ -50,7 +50,6 @@ def load_data(path):
         return pd.read_csv(path)
 
 
-@st.cache_data
 def concat_df(list_of_df):
     """
     This function is for the purpose of combining grant programs 
